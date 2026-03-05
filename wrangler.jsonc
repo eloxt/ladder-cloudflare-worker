@@ -8,10 +8,21 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2025-09-27",
 	"observability": {
-		"enabled": true
+		"enabled": true,
 	},
-	"compatibility_flags": [
-		"nodejs_compat"
+	"compatibility_flags": ["nodejs_compat"],
+	"r2_buckets": [
+		{
+			"binding": "STATIC_BUCKET",
+			"bucket_name": "ladder-static",
+			"remote": true,
+		},
+	],
+	"routes": [
+		{
+			"pattern": "config.eloxt.com",
+			"custom_domain": true
+		}
 	]
 	/**
 	 * Smart Placement
