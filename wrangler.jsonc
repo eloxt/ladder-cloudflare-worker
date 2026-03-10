@@ -10,7 +10,9 @@
 	"observability": {
 		"enabled": true,
 	},
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"r2_buckets": [
 		{
 			"binding": "STATIC_BUCKET",
@@ -21,9 +23,14 @@
 	"routes": [
 		{
 			"pattern": "config.eloxt.com",
-			"custom_domain": true
-		}
-	]
+			"custom_domain": true,
+		},
+	],
+	"placement": {
+		"mode": "smart",
+	},
+	"workers_dev": true,
+	"preview_urls": true,
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

@@ -35,7 +35,7 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 	}
 
 	const res1 = await fetch(yecaoProvider, {
-		headers: { 'User-Agent':  clashUA},
+		headers: { 'User-Agent': clashUA },
 	});
 	const body1 = await res1.text();
 	const config1: any = YAML.load(body1);
@@ -132,6 +132,59 @@ async function handleClash(bucket: R2Bucket): Promise<Response> {
 	return new Response(result, { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 }
 
+async function handleSingBox(bucket: R2Bucket): Promise<Response> {
+	const proxies = await parseConfig(bucket);
+	let outBoundsTags = ['direct'];
+
+	const templateFile = await bucket.get('sing-box_template.json');
+	if (!templateFile) {
+		return new Response('sing-box_template.json not found', { status: 404 });
+	}
+	const templateText = await templateFile.text();
+	const template = JSON.parse(templateText);
+
+	for (const proxy of proxies) {
+		const result = convertToSingBox(proxy);
+		template.outbounds.push(result);
+		outBoundsTags.push(result.tag);
+	}
+
+	// add direct outbound
+	template.outbounds.push({
+		type: 'direct',
+		tag: 'direct',
+	});
+
+	// Add selectors
+	template.outbounds.push({
+		tag: 'Proxy',
+		type: 'selector',
+		outbounds: outBoundsTags,
+	});
+	template.outbounds.push({
+		tag: 'Speedtest',
+		type: 'selector',
+		outbounds: outBoundsTags,
+	});
+	template.outbounds.push({
+		tag: 'AI',
+		type: 'selector',
+		outbounds: outBoundsTags,
+	});
+	template.outbounds.push({
+		tag: 'Telegram',
+		type: 'selector',
+		outbounds: outBoundsTags,
+	});
+	template.outbounds.push({
+		tag: 'Apple Service',
+		type: 'selector',
+		outbounds: outBoundsTags,
+	});
+
+	return new Response(JSON.stringify(template, null, 2), { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
+}
+
 async function handleWechatSurgeDomainset(): Promise<Response> {
 	const { domains } = await wechat();
 	let result = domains.map((d) => `DOMAIN-SUFFIX,${d}`).join('\n') + '\nDOMAIN-SUFFIX,paydns.wechat.com\n';
@@ -159,6 +212,20 @@ async function handleStatic(path: string, bucket: R2Bucket): Promise<Response> {
 	return new Response(object.body, { headers });
 }
 
+function convertToSingBox(content: ProxyNode) {
+	return {
+		type: 'trojan',
+		tag: content.name,
+		server: content.server,
+		server_port: content.port,
+		password: content.password,
+		tls: {
+			enabled: true,
+			server_name: content.sni,
+		},
+	};
+}
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
@@ -168,6 +235,7 @@ export default {
 		if (path === '/surge/1fa98d7a-c0dc-49be-8022-85014f3dbac3/domainset/wechat.list') return handleWechatSurgeDomainset();
 		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737') return handleClash(env.STATIC_BUCKET);
 		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737/domainset/wechat.yaml') return handleWechatClashDomainset();
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad') return handleSingBox(env.STATIC_BUCKET);
 		if (path.startsWith('/2774d2d9-d46b-4819-be0e-3d654270efcd/')) return handleStatic(path, env.STATIC_BUCKET);
 
 		return new Response('Not Found', { status: 404 });
