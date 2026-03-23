@@ -15,14 +15,130 @@ interface ProxyNode {
 	[key: string]: any;
 }
 
-let yecaoProvider = 'https://provider.example.test/56820/c/proxyproviders?auth=redacted-auth-token&v=t';
+let yecaoProvider = 'https://provider.example.test/yecao';
+let liangxinProvider = 'https://provider.example.test/liangxin';
 let xflashProvider = 'https://provider.example.test/xflash';
-let clashUA = 'ClashforWindows/0.19.8';
+let clashUA = 'mihomo.party/v1.9.2 (clash.meta)';
+
+interface ProviderConfig {
+	name: string;
+	url: string;
+	addFlag: boolean;
+}
+
+interface ProviderResult {
+	name: string;
+	nodes: ProxyNode[];
+	subscriptionUserinfo: string | null;
+}
+
+function createSeparator(name: string): ProxyNode {
+	return {
+		name,
+		type: 'trojan',
+		server: '127.0.0.1',
+		port: 55555,
+		password: '',
+	};
+}
+
+function parseSubscriptionUserinfo(header: string | null): { remainingBytes: number; expire: number } | null {
+	if (!header) return null;
+
+	const parts = new Map(
+		header.split(';').map((part) => {
+			const [key, value] = part.split('=').map((piece) => piece.trim());
+			return [key, Number(value)];
+		}),
+	);
+	const upload = parts.get('upload');
+	const download = parts.get('download');
+	const total = parts.get('total');
+	const expire = parts.get('expire');
+
+	if ([upload, download, total, expire].some((value) => value === undefined || Number.isNaN(value))) {
+		return null;
+	}
+
+	return {
+		remainingBytes: Math.max(0, total! - download! - upload!),
+		expire: expire!,
+	};
+}
+
+function formatBytes(bytes: number): string {
+	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+	let value = bytes;
+	let unitIndex = 0;
+
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex++;
+	}
+
+	return `${value.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function formatExpireDate(expire: number): string {
+	const formatter = new Intl.DateTimeFormat('en-CA', {
+		timeZone: 'Asia/Shanghai',
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	});
+	const parts = formatter.formatToParts(new Date(expire * 1000));
+	const year = parts.find((part) => part.type === 'year')?.value;
+	const month = parts.find((part) => part.type === 'month')?.value;
+	const day = parts.find((part) => part.type === 'day')?.value;
+
+	return `${year}-${month}-${day}`;
+}
+
+function buildProviderSeparatorName(name: string, subscriptionUserinfo: string | null): string {
+	const info = parseSubscriptionUserinfo(subscriptionUserinfo);
+	if (!info) return `---${name}---`;
+	return `---${name} 剩余 ${formatBytes(info.remainingBytes)} 到期 ${formatExpireDate(info.expire)}---`;
+}
+
+async function loadProviderNodes(provider: ProviderConfig): Promise<ProviderResult> {
+	const res = await fetch(provider.url, {
+		headers: { 'User-Agent': clashUA },
+	});
+	const body = await res.text();
+	let nodes: ProxyNode[] = [];
+
+	try {
+		const config = YAML.load(body) as { proxies?: ProxyNode[] } | null;
+		nodes = config?.proxies || [];
+	} catch (error) {
+		console.warn(`failed to load provider yaml: ${provider.name}`, error);
+		return {
+			name: provider.name,
+			nodes: [],
+			subscriptionUserinfo: null,
+		};
+	}
+
+	if (provider.addFlag) {
+		for (const node of nodes) {
+			node.name = countryFlag(node.name) + ' ' + node.name;
+		}
+	}
+
+	return {
+		name: provider.name,
+		nodes,
+		subscriptionUserinfo: res.headers.get('subscription-userinfo'),
+	};
+}
 
 async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<ProxyNode[]> {
 	let proxies: ProxyNode[] = [];
 
 	if (addExtra) {
+		const separator = createSeparator('---自建节点---');
+		proxies.push(separator);
+
 		const extraFile = await bucket.get('extra_node.yml');
 		if (extraFile) {
 			const gigsText = await extraFile.text();
@@ -34,25 +150,17 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 		}
 	}
 
-	const res1 = await fetch(yecaoProvider, {
-		headers: { 'User-Agent': clashUA },
-	});
-	const body1 = await res1.text();
-	const config1: any = YAML.load(body1);
+	const providerResults = await Promise.all([
+		loadProviderNodes({ name: '野草', url: yecaoProvider, addFlag: true }),
+		loadProviderNodes({ name: '良心云', url: liangxinProvider, addFlag: false }),
+		loadProviderNodes({ name: 'XFlash', url: xflashProvider, addFlag: false }),
+	]);
 
-	const res2 = await fetch(xflashProvider, {
-		headers: { 'User-Agent': clashUA },
-	});
-	const body2 = await res2.text();
-	const config2: any = YAML.load(body2);
-
-	for (const node of config1.proxies || []) {
-		node.name = countryFlag(node.name) + ' ' + node.name;
-		proxies.push(node);
-	}
-
-	for (const node of config2.proxies || []) {
-		proxies.push(node);
+	for (const group of providerResults.filter((group) => group.nodes.length > 0)) {
+		proxies.push(createSeparator(buildProviderSeparatorName(group.name, group.subscriptionUserinfo)));
+		for (const node of group.nodes) {
+			proxies.push(node);
+		}
 	}
 
 	return proxies;
