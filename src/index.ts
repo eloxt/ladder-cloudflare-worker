@@ -136,9 +136,6 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 	let proxies: ProxyNode[] = [];
 
 	if (addExtra) {
-		const separator = createSeparator('---自建节点---');
-		proxies.push(separator);
-
 		const extraFile = await bucket.get('extra_node.yml');
 		if (extraFile) {
 			const gigsText = await extraFile.text();
@@ -148,6 +145,8 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 				proxies.push(node);
 			}
 		}
+
+		proxies.push(createSeparator('---自建节点---'));
 	}
 
 	const providerResults = await Promise.all([
@@ -157,10 +156,10 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 	]);
 
 	for (const group of providerResults.filter((group) => group.nodes.length > 0)) {
-		proxies.push(createSeparator(buildProviderSeparatorName(group.name, group.subscriptionUserinfo)));
 		for (const node of group.nodes) {
 			proxies.push(node);
 		}
+		proxies.push(createSeparator(buildProviderSeparatorName(group.name, group.subscriptionUserinfo)));
 	}
 
 	return proxies;
