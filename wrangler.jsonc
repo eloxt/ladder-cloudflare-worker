@@ -31,6 +31,14 @@
 	},
 	"workers_dev": true,
 	"preview_urls": true,
+	"secrets": {
+		"required": [
+			"YECAO_PROVIDER_URL",
+			"LIANGXIN_PROVIDER_URL",
+			"XFLASH_PROVIDER_URL",
+			"TAILSCALE_AUTH_KEY",
+		],
+	},
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

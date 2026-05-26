@@ -1,0 +1,4 @@
+YECAO_PROVIDER_URL="https://example.com/yecao-subscription"
+LIANGXIN_PROVIDER_URL="https://example.com/liangxin-subscription"
+XFLASH_PROVIDER_URL="https://example.com/xflash-subscription"
+TAILSCALE_AUTH_KEY="tskey-auth-example"

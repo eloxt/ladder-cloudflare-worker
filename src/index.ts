@@ -2,6 +2,10 @@ import YAML from 'js-yaml';
 
 interface Env {
 	STATIC_BUCKET: R2Bucket;
+	YECAO_PROVIDER_URL: string;
+	LIANGXIN_PROVIDER_URL: string;
+	XFLASH_PROVIDER_URL: string;
+	TAILSCALE_AUTH_KEY: string;
 }
 
 interface ProxyNode {
@@ -15,11 +19,7 @@ interface ProxyNode {
 	[key: string]: any;
 }
 
-let yecaoProvider = 'https://provider.example.test/yecao';
-let liangxinProvider = 'https://provider.example.test/liangxin';
-let xflashProvider = 'https://provider.example.test/xflash';
-let clashUA = 'mihomo.party/v1.9.2 (clash.meta)';
-let tailscaleAuthKey = 'test-tailscale-auth-key';
+const clashUA = 'mihomo.party/v1.9.2 (clash.meta)';
 
 interface ProviderConfig {
 	name: string;
@@ -31,6 +31,14 @@ interface ProviderResult {
 	name: string;
 	nodes: ProxyNode[];
 	subscriptionUserinfo: string | null;
+}
+
+function buildProviderConfigs(env: Env): ProviderConfig[] {
+	return [
+		{ name: '野草', url: env.YECAO_PROVIDER_URL, addFlag: true },
+		{ name: '良心云', url: env.LIANGXIN_PROVIDER_URL, addFlag: false },
+		{ name: 'XFlash', url: env.XFLASH_PROVIDER_URL, addFlag: false },
+	];
 }
 
 function createSeparator(name: string): ProxyNode {
@@ -133,7 +141,7 @@ async function loadProviderNodes(provider: ProviderConfig): Promise<ProviderResu
 	};
 }
 
-async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<ProxyNode[]> {
+async function parseConfig(bucket: R2Bucket, providerConfigs: ProviderConfig[], addExtra: boolean = true): Promise<ProxyNode[]> {
 	let proxies: ProxyNode[] = [];
 
 	if (addExtra) {
@@ -150,11 +158,7 @@ async function parseConfig(bucket: R2Bucket, addExtra: boolean = true): Promise<
 		proxies.push(createSeparator('---自建节点---'));
 	}
 
-	const providerResults = await Promise.all([
-		loadProviderNodes({ name: '野草', url: yecaoProvider, addFlag: true }),
-		loadProviderNodes({ name: '良心云', url: liangxinProvider, addFlag: false }),
-		loadProviderNodes({ name: 'XFlash', url: xflashProvider, addFlag: false }),
-	]);
+	const providerResults = await Promise.all(providerConfigs.map((provider) => loadProviderNodes(provider)));
 
 	for (const group of providerResults.filter((group) => group.nodes.length > 0)) {
 		for (const node of group.nodes) {
@@ -220,8 +224,8 @@ async function wechat(): Promise<{ domains: string[]; ips: string[] }> {
 	return { domains: Array.from(domains), ips: Array.from(ips) };
 }
 
-async function handleSurge(bucket: R2Bucket): Promise<Response> {
-	const proxies = await parseConfig(bucket);
+async function handleSurge(env: Env): Promise<Response> {
+	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
 	let result = '';
 	for (const node of proxies) {
 		if (node.type === 'trojan') {
@@ -234,17 +238,17 @@ async function handleSurge(bucket: R2Bucket): Promise<Response> {
 	return new Response(result, { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 }
 
-async function handleClash(bucket: R2Bucket): Promise<Response> {
-	const proxies = await parseConfig(bucket);
+async function handleClash(env: Env): Promise<Response> {
+	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
 	const result = 'proxies:\n' + YAML.dump(proxies);
 	return new Response(result, { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 }
 
-async function handleSingBox(bucket: R2Bucket, device?: string): Promise<Response> {
-	const proxies = await parseConfig(bucket);
+async function handleSingBox(env: Env, device?: string): Promise<Response> {
+	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
 	let outBoundsTags = ['direct'];
 
-	const templateFile = await bucket.get('sing-box_template.json');
+	const templateFile = await env.STATIC_BUCKET.get('sing-box_template.json');
 	if (!templateFile) {
 		return new Response('sing-box_template.json not found', { status: 404 });
 	}
@@ -252,14 +256,17 @@ async function handleSingBox(bucket: R2Bucket, device?: string): Promise<Respons
 	const template = JSON.parse(templateText);
 
 	if (device) {
-		let endpoint = {
-      type: "tailscale",
-      tag: "tailscale",
-      auth_key: tailscaleAuthKey,
-      hostname: `${device}-sing-box`,
-      accept_routes: true
-    }
-		template.endpoints.push(endpoint)
+		if (!env.TAILSCALE_AUTH_KEY) {
+			return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
+		}
+		const endpoint = {
+			type: 'tailscale',
+			tag: 'tailscale',
+			auth_key: env.TAILSCALE_AUTH_KEY,
+			hostname: `${device}-sing-box`,
+			accept_routes: true,
+		};
+		template.endpoints.push(endpoint);
 	} else {
 		template.route.rules = template.route.rules.filter((rule: any) => {
 			const isDirectWifiRule =
@@ -372,14 +379,14 @@ export default {
 		const url = new URL(request.url);
 		const path = url.pathname;
 
-		if (path === '/surge/1fa98d7a-c0dc-49be-8022-85014f3dbac3') return handleSurge(env.STATIC_BUCKET);
+		if (path === '/surge/1fa98d7a-c0dc-49be-8022-85014f3dbac3') return handleSurge(env);
 		if (path === '/surge/1fa98d7a-c0dc-49be-8022-85014f3dbac3/domainset/wechat.list') return handleWechatSurgeDomainset();
-		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737') return handleClash(env.STATIC_BUCKET);
+		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737') return handleClash(env);
 		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737/domainset/wechat.yaml') return handleWechatClashDomainset();
-		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad') return handleSingBox(env.STATIC_BUCKET);
-		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/mac') return handleSingBox(env.STATIC_BUCKET, "eloxts-macbook-pro");
-		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/iphone') return handleSingBox(env.STATIC_BUCKET, "eloxts-iphone");
-		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/ipad') return handleSingBox(env.STATIC_BUCKET, "eloxts-ipad");
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad') return handleSingBox(env);
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/mac') return handleSingBox(env, "eloxts-macbook-pro");
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/iphone') return handleSingBox(env, "eloxts-iphone");
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/ipad') return handleSingBox(env, "eloxts-ipad");
 		if (path.startsWith('/2774d2d9-d46b-4819-be0e-3d654270efcd/')) return handleStatic(path, env.STATIC_BUCKET);
 
 		return new Response('Not Found', { status: 404 });

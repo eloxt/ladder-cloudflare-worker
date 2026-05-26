@@ -2,6 +2,18 @@ import YAML from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 
+type WorkerEnv = Parameters<typeof worker.fetch>[1];
+
+function createEnv(bucket: R2Bucket): WorkerEnv {
+	return {
+		STATIC_BUCKET: bucket,
+		YECAO_PROVIDER_URL: 'https://provider.example.test/yecao',
+		LIANGXIN_PROVIDER_URL: 'https://provider.example.test/liangxin',
+		XFLASH_PROVIDER_URL: 'https://provider.example.test/xflash',
+		TAILSCALE_AUTH_KEY: 'test-tailscale-auth-key',
+	};
+}
+
 describe('parseConfig via clash endpoint', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -22,7 +34,7 @@ describe('parseConfig via clash endpoint', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
-					if (url.includes('provider-yecao')) {
+					if (url.includes('/yecao')) {
 						return new Response(
 							YAML.dump({
 								proxies: [{ name: '香港一号', type: 'trojan', server: 'hk.example.com', port: 443, password: 'hk' }],
@@ -34,10 +46,10 @@ describe('parseConfig via clash endpoint', () => {
 							},
 						);
 					}
-					if (url.includes('provider.example.test')) {
+					if (url.includes('/liangxin')) {
 						return new Response(YAML.dump({ proxies: [] }));
 					}
-					if (url.includes('provider.example.test')) {
+					if (url.includes('/xflash')) {
 						return new Response(
 						YAML.dump({
 							proxies: [
@@ -58,7 +70,7 @@ describe('parseConfig via clash endpoint', () => {
 
 		const response = await worker.fetch(
 			new Request('https://example.com/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737'),
-			{ STATIC_BUCKET: bucket as unknown as R2Bucket } as never,
+			createEnv(bucket as unknown as R2Bucket),
 		);
 		const config = YAML.load(await response.text()) as { proxies: Array<{ name: string; type: string; server: string; port: number }> };
 
@@ -103,17 +115,17 @@ describe('parseConfig via clash endpoint', () => {
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
-				if (url.includes('provider-yecao')) {
+				if (url.includes('/yecao')) {
 					return new Response('proxies: [');
 				}
-				if (url.includes('provider.example.test')) {
+				if (url.includes('/liangxin')) {
 					return new Response(
 						YAML.dump({
 							proxies: [{ name: '良心云一号', type: 'trojan', server: 'lx.example.com', port: 443, password: 'lx' }],
 						}),
 					);
 				}
-				if (url.includes('provider.example.test')) {
+				if (url.includes('/xflash')) {
 					return new Response(
 						YAML.dump({
 							proxies: [{ name: 'XFlash一号', type: 'trojan', server: 'xf.example.com', port: 443, password: 'xf' }],
@@ -126,7 +138,7 @@ describe('parseConfig via clash endpoint', () => {
 
 		const response = await worker.fetch(
 			new Request('https://example.com/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737'),
-			{ STATIC_BUCKET: bucket as unknown as R2Bucket } as never,
+			createEnv(bucket as unknown as R2Bucket),
 		);
 		const config = YAML.load(await response.text()) as { proxies: Array<{ name: string }> };
 		const names = config.proxies.map((proxy) => proxy.name);
