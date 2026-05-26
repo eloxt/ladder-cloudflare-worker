@@ -19,6 +19,7 @@ let yecaoProvider = 'https://provider.example.test/yecao';
 let liangxinProvider = 'https://provider.example.test/liangxin';
 let xflashProvider = 'https://provider.example.test/xflash';
 let clashUA = 'mihomo.party/v1.9.2 (clash.meta)';
+let tailscaleAuthKey = 'test-tailscale-auth-key';
 
 interface ProviderConfig {
 	name: string;
@@ -239,7 +240,7 @@ async function handleClash(bucket: R2Bucket): Promise<Response> {
 	return new Response(result, { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 }
 
-async function handleSingBox(bucket: R2Bucket): Promise<Response> {
+async function handleSingBox(bucket: R2Bucket, device?: string): Promise<Response> {
 	const proxies = await parseConfig(bucket);
 	let outBoundsTags = ['direct'];
 
@@ -249,6 +250,34 @@ async function handleSingBox(bucket: R2Bucket): Promise<Response> {
 	}
 	const templateText = await templateFile.text();
 	const template = JSON.parse(templateText);
+
+	if (device) {
+		let endpoint = {
+      type: "tailscale",
+      tag: "tailscale",
+      auth_key: tailscaleAuthKey,
+      hostname: `${device}-sing-box`,
+      accept_routes: true
+    }
+		template.endpoints.push(endpoint)
+	} else {
+		template.route.rules = template.route.rules.filter((rule: any) => {
+			const isDirectWifiRule =
+				rule?.type === 'logical' &&
+				rule?.mode === 'and' &&
+				rule?.outbound === 'direct' &&
+				Array.isArray(rule?.rules) &&
+				rule.rules.length === 2 &&
+				rule.rules.some((item: any) => item?.ip_cidr === '10.1.1.0/24') &&
+				rule.rules.some((item: any) => item?.wifi_ssid === 'Eloxt');
+
+			const isTailscaleRoute =
+				rule?.ip_cidr === '10.1.1.0/24' &&
+				rule?.outbound === 'tailscale';
+
+			return !isDirectWifiRule && !isTailscaleRoute;
+		});
+	}
 
 	for (const proxy of proxies) {
 		const result = convertToSingBox(proxy);
@@ -267,26 +296,31 @@ async function handleSingBox(bucket: R2Bucket): Promise<Response> {
 		tag: 'Proxy',
 		type: 'selector',
 		outbounds: outBoundsTags,
+		interrupt_exist_connections: true
 	});
 	template.outbounds.push({
 		tag: 'Speedtest',
 		type: 'selector',
 		outbounds: outBoundsTags,
+		interrupt_exist_connections: true
 	});
 	template.outbounds.push({
 		tag: 'AI',
 		type: 'selector',
 		outbounds: outBoundsTags,
+		interrupt_exist_connections: true
 	});
 	template.outbounds.push({
 		tag: 'Telegram',
 		type: 'selector',
 		outbounds: outBoundsTags,
+		interrupt_exist_connections: true
 	});
 	template.outbounds.push({
 		tag: 'Apple Service',
 		type: 'selector',
 		outbounds: outBoundsTags,
+		interrupt_exist_connections: true
 	});
 
 	return new Response(JSON.stringify(template, null, 2), { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
@@ -343,6 +377,9 @@ export default {
 		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737') return handleClash(env.STATIC_BUCKET);
 		if (path === '/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737/domainset/wechat.yaml') return handleWechatClashDomainset();
 		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad') return handleSingBox(env.STATIC_BUCKET);
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/mac') return handleSingBox(env.STATIC_BUCKET, "eloxts-macbook-pro");
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/iphone') return handleSingBox(env.STATIC_BUCKET, "eloxts-iphone");
+		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/ipad') return handleSingBox(env.STATIC_BUCKET, "eloxts-ipad");
 		if (path.startsWith('/2774d2d9-d46b-4819-be0e-3d654270efcd/')) return handleStatic(path, env.STATIC_BUCKET);
 
 		return new Response('Not Found', { status: 404 });
