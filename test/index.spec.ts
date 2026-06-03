@@ -147,3 +147,171 @@ describe('parseConfig via clash endpoint', () => {
 		expect(names.some((name) => name.includes('野草'))).toBe(false);
 	});
 });
+
+describe('sing-box conversion', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	it('converts vless nodes to sing-box outbounds', async () => {
+		const bucket = {
+			get: vi.fn(async (key: string) => {
+				if (key === 'extra_node.yml') {
+					return {
+						text: async () =>
+							YAML.dump({
+								proxies: [
+									{
+										name: '美国 VLESS',
+										type: 'vless',
+										server: 'vless.example.com',
+										port: 443,
+										uuid: 'bf000d23-0752-40b4-affe-68f7707a9661',
+										tls: true,
+										servername: 'cdn.example.com',
+										network: 'ws',
+										'ws-opts': {
+											path: '/ws',
+											headers: {
+												Host: 'cdn.example.com',
+											},
+										},
+										'client-fingerprint': 'chrome',
+									},
+								],
+							}),
+					};
+				}
+				if (key === 'sing-box_template.json') {
+					return {
+						text: async () =>
+							JSON.stringify({
+								endpoints: [],
+								route: {
+									rules: [],
+								},
+								outbounds: [],
+							}),
+					};
+				}
+				return null;
+			}),
+		};
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response(YAML.dump({ proxies: [] }))),
+		);
+
+		const response = await worker.fetch(
+			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
+			createEnv(bucket as unknown as R2Bucket),
+		);
+		const config = (await response.json()) as { outbounds: any[] };
+		const outbound = config.outbounds.find((item) => item.tag === '🇺🇸 美国 VLESS');
+
+		expect(outbound).toEqual({
+			type: 'vless',
+			tag: '🇺🇸 美国 VLESS',
+			server: 'vless.example.com',
+			server_port: 443,
+			uuid: 'bf000d23-0752-40b4-affe-68f7707a9661',
+			tls: {
+				enabled: true,
+				server_name: 'cdn.example.com',
+				utls: {
+					enabled: true,
+					fingerprint: 'chrome',
+				},
+			},
+			transport: {
+				type: 'ws',
+				path: '/ws',
+				headers: {
+					Host: 'cdn.example.com',
+				},
+			},
+		});
+	});
+
+	it('converts vless tcp reality nodes to sing-box outbounds', async () => {
+		const bucket = {
+			get: vi.fn(async (key: string) => {
+				if (key === 'extra_node.yml') {
+					return {
+						text: async () =>
+							YAML.dump({
+								proxies: [
+									{
+										name: '美国 Mock VLESS',
+										type: 'vless',
+										server: '203.0.113.10',
+										port: 443,
+										uuid: '11111111-2222-4333-8444-555555555555',
+										network: 'tcp',
+										tls: true,
+										udp: true,
+										flow: 'xtls-rprx-vision',
+										servername: 'stream.example.com',
+										'client-fingerprint': 'chrome',
+										'reality-opts': {
+											'public-key': 'mockRealityPublicKeyForSingBoxTest1234567890',
+											'short-id': '0123456789abcdef',
+										},
+									},
+								],
+							}),
+					};
+				}
+				if (key === 'sing-box_template.json') {
+					return {
+						text: async () =>
+							JSON.stringify({
+								endpoints: [],
+								route: {
+									rules: [],
+								},
+								outbounds: [],
+							}),
+					};
+				}
+				return null;
+			}),
+		};
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response(YAML.dump({ proxies: [] }))),
+		);
+
+		const response = await worker.fetch(
+			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
+			createEnv(bucket as unknown as R2Bucket),
+		);
+		const config = (await response.json()) as { outbounds: any[] };
+		const outbound = config.outbounds.find((item) => item.tag === '🇺🇸 美国 Mock VLESS');
+
+		expect(outbound).toEqual({
+			type: 'vless',
+			tag: '🇺🇸 美国 Mock VLESS',
+			server: '203.0.113.10',
+			server_port: 443,
+			uuid: '11111111-2222-4333-8444-555555555555',
+			flow: 'xtls-rprx-vision',
+			tls: {
+				enabled: true,
+				server_name: 'stream.example.com',
+				utls: {
+					enabled: true,
+					fingerprint: 'chrome',
+				},
+				reality: {
+					enabled: true,
+					public_key: 'mockRealityPublicKeyForSingBoxTest1234567890',
+					short_id: '0123456789abcdef',
+				},
+			},
+		});
+	});
+});

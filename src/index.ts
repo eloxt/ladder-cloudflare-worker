@@ -14,8 +14,25 @@ interface ProxyNode {
 	server: string;
 	port: number;
 	password?: string;
+	uuid?: string;
 	sni?: string;
+	servername?: string;
+	tls?: boolean;
+	flow?: string;
 	network?: string;
+	'ws-opts'?: {
+		path?: string;
+		headers?: Record<string, string>;
+	};
+	'grpc-opts'?: {
+		'grpc-service-name'?: string;
+	};
+	'reality-opts'?: {
+		'public-key'?: string;
+		'short-id'?: string;
+	};
+	'client-fingerprint'?: string;
+	'skip-cert-verify'?: boolean;
 	[key: string]: any;
 }
 
@@ -360,17 +377,73 @@ async function handleStatic(path: string, bucket: R2Bucket): Promise<Response> {
 	return new Response(object.body, { headers });
 }
 
+function buildSingBoxTls(content: ProxyNode, enabled: boolean) {
+	if (!enabled) return undefined;
+
+	const tls: any = {
+		enabled: true,
+		server_name: content.sni || content.servername,
+		insecure: content['skip-cert-verify'] || undefined,
+	};
+
+	if (content['client-fingerprint']) {
+		tls.utls = {
+			enabled: true,
+			fingerprint: content['client-fingerprint'],
+		};
+	}
+
+	if (content['reality-opts']?.['public-key']) {
+		tls.reality = {
+			enabled: true,
+			public_key: content['reality-opts']['public-key'],
+			short_id: content['reality-opts']['short-id'],
+		};
+	}
+
+	return tls;
+}
+
+function buildSingBoxTransport(content: ProxyNode) {
+	if (content.network === 'ws') {
+		return {
+			type: 'ws',
+			path: content['ws-opts']?.path,
+			headers: content['ws-opts']?.headers,
+		};
+	}
+
+	if (content.network === 'grpc') {
+		return {
+			type: 'grpc',
+			service_name: content['grpc-opts']?.['grpc-service-name'],
+		};
+	}
+
+	return undefined;
+}
+
 function convertToSingBox(content: ProxyNode) {
+	if (content.type === 'vless') {
+		return {
+			type: 'vless',
+			tag: content.name,
+			server: content.server,
+			server_port: content.port,
+			uuid: content.uuid,
+			flow: content.flow,
+			tls: buildSingBoxTls(content, content.tls === true || Boolean(content.sni || content.servername || content['reality-opts'])),
+			transport: buildSingBoxTransport(content),
+		};
+	}
+
 	return {
 		type: 'trojan',
 		tag: content.name,
 		server: content.server,
 		server_port: content.port,
 		password: content.password,
-		tls: {
-			enabled: true,
-			server_name: content.sni,
-		},
+		tls: buildSingBoxTls(content, true),
 	};
 }
 
