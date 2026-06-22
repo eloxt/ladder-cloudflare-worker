@@ -6,6 +6,7 @@ interface Env {
 	LIANGXIN_PROVIDER_URL: string;
 	XFLASH_PROVIDER_URL: string;
 	TAILSCALE_AUTH_KEY: string;
+	TAILSCALE_ADMIRAL_AUTH_KEY: string;
 }
 
 interface ProxyNode {
@@ -261,7 +262,7 @@ async function handleClash(env: Env): Promise<Response> {
 	return new Response(result, { headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 }
 
-async function handleSingBox(env: Env, device?: string): Promise<Response> {
+async function handleSingBox(env: Env, device?: string, authKey?: string): Promise<Response> {
 	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
 	let outBoundsTags = ['direct'];
 
@@ -273,34 +274,49 @@ async function handleSingBox(env: Env, device?: string): Promise<Response> {
 	const template = JSON.parse(templateText);
 
 	if (device) {
-		if (!env.TAILSCALE_AUTH_KEY) {
+		const isAdmiral = Boolean(authKey);
+		const tailscaleAuthKey = authKey || env.TAILSCALE_AUTH_KEY;
+		if (!tailscaleAuthKey) {
 			return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
 		}
 		const endpoint = {
 			type: 'tailscale',
 			tag: 'tailscale',
-			auth_key: env.TAILSCALE_AUTH_KEY,
+			auth_key: tailscaleAuthKey,
 			hostname: `${device}-sing-box`,
 			accept_routes: true,
 		};
 		template.endpoints.push(endpoint);
-	} else {
-		template.route.rules = template.route.rules.filter((rule: any) => {
-			const isDirectWifiRule =
-				rule?.type === 'logical' &&
-				rule?.mode === 'and' &&
-				rule?.outbound === 'direct' &&
-				Array.isArray(rule?.rules) &&
-				rule.rules.length === 2 &&
-				rule.rules.some((item: any) => item?.ip_cidr === '10.1.1.0/24') &&
-				rule.rules.some((item: any) => item?.wifi_ssid === 'Eloxt');
 
-			const isTailscaleRoute =
-				rule?.ip_cidr === '10.1.1.0/24' &&
-				rule?.outbound === 'tailscale';
+		const tailscaleRules = isAdmiral
+			? [
+					{
+						ip_cidr: '10.0.0.0/24',
+						outbound: 'tailscale',
+					},
+				]
+			: [
+					{
+						type: 'logical',
+						mode: 'and',
+						rules: [{ ip_cidr: '10.1.1.0/24' }, { wifi_ssid: 'Eloxt' }],
+						outbound: 'direct',
+					},
+					{
+						ip_cidr: '10.1.1.0/24',
+						outbound: 'tailscale',
+					},
+				];
 
-			return !isDirectWifiRule && !isTailscaleRoute;
-		});
+		const lanIpIndex = template.route.rules.findIndex(
+			(rule: any) =>
+				rule?.rule_set === 'lan_ip' || (Array.isArray(rule?.rule_set) && rule.rule_set.includes('lan_ip')),
+		);
+		if (lanIpIndex === -1) {
+			template.route.rules.push(...tailscaleRules);
+		} else {
+			template.route.rules.splice(lanIpIndex, 0, ...tailscaleRules);
+		}
 	}
 
 	for (const proxy of proxies) {
@@ -460,6 +476,10 @@ export default {
 		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/mac') return handleSingBox(env, "eloxts-macbook-pro");
 		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/iphone') return handleSingBox(env, "eloxts-iphone");
 		if (path === '/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/ipad') return handleSingBox(env, "eloxts-ipad");
+		if (path.startsWith('/sing-box/admiralxs/')) {
+			const device = path.slice('/sing-box/admiralxs/'.length);
+			return handleSingBox(env, device, env.TAILSCALE_ADMIRAL_AUTH_KEY);
+		}
 		if (path.startsWith('/2774d2d9-d46b-4819-be0e-3d654270efcd/')) return handleStatic(path, env.STATIC_BUCKET);
 
 		return new Response('Not Found', { status: 404 });
