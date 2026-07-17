@@ -287,7 +287,7 @@ async function handleSingBox(env: Env, device?: string, authKey?: string): Promi
 			accept_routes: true,
 		};
 		if (device === 'eloxts-macbook-pro') {
-			endpoint.advertise_routes = ['10.10.10.87/32'];
+			endpoint.advertise_routes = ['10.10.10.87/32', '10.10.10.51/32'];
 		}
 		template.endpoints.push(endpoint);
 
