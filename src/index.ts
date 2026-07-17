@@ -279,13 +279,16 @@ async function handleSingBox(env: Env, device?: string, authKey?: string): Promi
 		if (!tailscaleAuthKey) {
 			return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
 		}
-		const endpoint = {
+		const endpoint: Record<string, any> = {
 			type: 'tailscale',
 			tag: 'tailscale',
 			auth_key: tailscaleAuthKey,
 			hostname: `${device}-sing-box`,
 			accept_routes: true,
 		};
+		if (device === 'eloxts-macbook-pro') {
+			endpoint.advertise_routes = ['10.10.10.87/32'];
+		}
 		template.endpoints.push(endpoint);
 
 		const tailscaleRules = isAdmiral
