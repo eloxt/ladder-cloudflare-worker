@@ -314,4 +314,57 @@ describe('sing-box conversion', () => {
 			},
 		});
 	});
+
+	it('converts anytls nodes to sing-box outbounds', async () => {
+		const bucket = {
+			get: vi.fn(async (key: string) => {
+				if (key === 'extra_node.yml') {
+					return {
+						text: async () =>
+							YAML.dump({
+								proxies: [
+									{
+										name: '澳大利亚',
+										type: 'anytls',
+										server: '03.giant.au.example.com',
+										port: 443,
+										password: 'example',
+										'client-fingerprint': 'firefox',
+										sni: 'dss0.bdstatic.com',
+										'skip-cert-verify': true,
+									},
+								],
+							}),
+					};
+				}
+				if (key === 'sing-box_template.json') {
+					return { text: async () => JSON.stringify({ endpoints: [], route: { rules: [] }, outbounds: [] }) };
+				}
+				return null;
+			}),
+		};
+
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(YAML.dump({ proxies: [] }))));
+
+		const response = await worker.fetch(
+			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
+			createEnv(bucket as unknown as R2Bucket),
+		);
+		const config = (await response.json()) as { outbounds: any[] };
+		const outbound = config.outbounds.find((item) => item.tag === '🇦🇹 澳大利亚');
+
+		expect(outbound).toEqual({
+			type: 'anytls',
+			tag: '🇦🇹 澳大利亚',
+			server: '03.giant.au.example.com',
+			server_port: 443,
+			password: 'example',
+			tls: {
+				enabled: true,
+				server_name: 'dss0.bdstatic.com',
+				insecure: true,
+				utls: { enabled: true, fingerprint: 'firefox' },
+			},
+		});
+	});
 });
