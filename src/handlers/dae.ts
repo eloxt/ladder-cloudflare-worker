@@ -178,20 +178,42 @@ function extRules(file: string, tags: string[], matcher: 'domain' | 'dip', actio
 	return tags.map((tag) => `${matcher}(ext:${quote(`${file}:${tag}`)}) -> ${action}`);
 }
 
+type DaeRule = {
+	file: 'geosite' | 'geoip';
+	matcher: 'domain' | 'dip';
+	tags: string[];
+	target: string;
+};
+
+/**
+ * Keep the default dae routing aligned with the sing-box template used by the
+ * other subscription endpoint. Rules whose source group is not present in
+ * SukkaW/Surge are intentionally not invented here.
+ */
+const DEFAULT_DAE_RULES: DaeRule[] = [
+	{ file: 'geosite', matcher: 'domain', tags: ['speedtest'], target: 'Speedtest' },
+	{ file: 'geosite', matcher: 'domain', tags: ['cdn'], target: 'proxy' },
+	{ file: 'geosite', matcher: 'domain', tags: ['ai', 'apple-intelligence'], target: 'AI' },
+	{ file: 'geosite', matcher: 'domain', tags: ['telegram'], target: 'Telegram' },
+	{ file: 'geosite', matcher: 'domain', tags: ['apple-cn', 'icloud-private-relay', 'microsoft'], target: 'direct' },
+	{ file: 'geosite', matcher: 'domain', tags: ['non-ip-cdn'], target: 'proxy' },
+	{ file: 'geosite', matcher: 'domain', tags: ['non-ip-domestic', 'direct'], target: 'direct' },
+	{ file: 'geosite', matcher: 'domain', tags: ['global'], target: 'proxy' },
+	{ file: 'geoip', matcher: 'dip', tags: ['lan', 'domestic'], target: 'direct' },
+	{ file: 'geoip', matcher: 'dip', tags: ['ip-cdn'], target: 'proxy' },
+];
+
+function buildMappedRules(geositeFile: string, geoipFile: string): string[] {
+	return DEFAULT_DAE_RULES.flatMap((rule) =>
+		extRules(rule.file === 'geosite' ? geositeFile : geoipFile, rule.tags, rule.matcher, rule.target),
+	);
+}
+
 export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `https://config.eloxt.com${DAE_DATA_PREFIX}`): string {
 	const geositeFile = env.DAE_GEOSITE_FILE || DEFAULT_GEOSITE_FILE;
 	const geoipFile = env.DAE_GEOIP_FILE || DEFAULT_GEOIP_FILE;
-	const blockTags = splitTags(env.DAE_BLOCK_TAGS, [
-		'reject',
-		'ip-reject',
-		'non-ip-reject',
-		'reject-extra',
-		'reject-drop',
-		'reject-no-drop',
-		'reject-url-regex',
-		'my-reject',
-	]);
-	const directTags = splitTags(env.DAE_DIRECT_TAGS, ['direct', 'domestic', 'non-ip-domestic', 'lan', 'my-direct']);
+	const blockTags = splitTags(env.DAE_BLOCK_TAGS, []);
+	const directTags = splitTags(env.DAE_DIRECT_TAGS, []);
 	const nodeLines: string[] = [];
 	const skipped: string[] = [];
 	const names = new Set<string>();
@@ -211,6 +233,7 @@ export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `ht
 	const rules = [
 		...extRules(geositeFile, blockTags, 'domain', 'block'),
 		...extRules(geoipFile, blockTags, 'dip', 'block'),
+		...buildMappedRules(geositeFile, geoipFile),
 		...extRules(geositeFile, directTags, 'domain', 'direct'),
 		...extRules(geoipFile, directTags, 'dip', 'direct'),
 	];
@@ -242,6 +265,15 @@ export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `ht
 		'\tproxy {',
 		'\t\tpolicy: min_moving_avg',
 		'\t}',
+		'\tSpeedtest {',
+		'\t\tpolicy: min_moving_avg',
+		'\t}',
+		'\tAI {',
+		'\t\tpolicy: min_moving_avg',
+		'\t}',
+		'\tTelegram {',
+		'\t\tpolicy: min_moving_avg',
+		'\t}',
 		'}',
 		'',
 		'dns {',
@@ -262,6 +294,7 @@ export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `ht
 		'\tdip(224.0.0.0/3, \'ff00::/8\') -> direct',
 		'\tdip(geoip:private) -> direct',
 		'\tdomain(geosite:cn) -> direct',
+		'\tdomain(hgj.com, hgj.net) -> direct',
 		...rules.map((rule) => `\t${rule}`),
 		'\tfallback: proxy',
 		'}',

@@ -410,6 +410,7 @@ describe('dae conversion', () => {
 			{
 				DAE_GEOSITE_FILE: 'surge-geosite.dat',
 				DAE_GEOIP_FILE: 'surge-geoip.dat',
+				DAE_BLOCK_TAGS: 'reject',
 				STATIC_BUCKET: {} as R2Bucket,
 				YECAO_PROVIDER_URL: '',
 				LIANGXIN_PROVIDER_URL: '',
@@ -423,8 +424,18 @@ describe('dae conversion', () => {
 		expect(config).toContain('trojan://secret@hk.example.com:443');
 		expect(config).not.toContain('127.0.0.1:55555');
 		expect(config).toContain('domain(ext:\'surge-geosite.dat:reject\') -> block');
-		expect(config).toContain('dip(ext:\'surge-geoip.dat:direct\') -> direct');
+		expect(config).toContain('domain(ext:\'surge-geosite.dat:speedtest\') -> Speedtest');
+		expect(config).toContain('domain(ext:\'surge-geosite.dat:ai\') -> AI');
+		expect(config).toContain('domain(ext:\'surge-geosite.dat:telegram\') -> Telegram');
+		expect(config).toContain('domain(ext:\'surge-geosite.dat:global\') -> proxy');
+		expect(config).toContain('dip(ext:\'surge-geoip.dat:domestic\') -> direct');
+		expect(config).toContain('dip(ext:\'surge-geoip.dat:ip-cdn\') -> proxy');
+		expect(config).toContain('group {\n\tproxy {');
+		expect(config).toContain('\tSpeedtest {');
+		expect(config).toContain('\tAI {');
+		expect(config).toContain('\tTelegram {');
 		expect(config).toContain('domain(geosite:cn) -> direct');
+		expect(config).toContain('domain(hgj.com, hgj.net) -> direct');
 		expect(config).toContain('fallback: proxy');
 		expect(config).toContain('https://config.eloxt.com/dae-data/test-token/surge-geosite.dat');
 	});
