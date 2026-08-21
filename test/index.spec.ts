@@ -1,6 +1,12 @@
 import YAML from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DAE_DATA_PATH, buildDaeConfig, convertToDaeNode, handleDaeData } from '../src/handlers/dae';
+import {
+	DAE_DATA_PATH,
+	buildDaeConfig,
+	buildDaeSubscription,
+	convertToDaeNode,
+	handleDaeData,
+} from '../src/handlers/dae';
 import worker from '../src/index';
 
 type WorkerEnv = Parameters<typeof worker.fetch>[1];
@@ -438,6 +444,19 @@ describe('dae conversion', () => {
 		expect(config).toContain('domain(hgj.com, hgj.net) -> direct');
 		expect(config).toContain('fallback: proxy');
 		expect(config).toContain('https://config.eloxt.com/dae-data/test-token/surge-geosite.dat');
+	});
+
+	it('builds a dae-wing compatible base64 subscription', () => {
+		const encoded = buildDaeSubscription([
+			{ name: '🇭🇰 Trojan', type: 'trojan', server: 'hk.example.com', port: 443, password: 'secret' },
+			{ name: '---野草---', type: 'trojan', server: '127.0.0.1', port: 55555, password: '' },
+		]);
+		const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+
+		expect(decoded).toContain('trojan://secret@hk.example.com:443');
+		expect(decoded).toContain('#');
+		expect(decoded).not.toContain('127.0.0.1:55555');
+		expect(decoded.endsWith('\n')).toBe(true);
 	});
 
 	it('serves only the generated dat objects from R2', async () => {

@@ -96,6 +96,13 @@ function base64Url(value: string): string {
 	return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
+function base64(value: string): string {
+	const bytes = new TextEncoder().encode(value);
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary);
+}
+
 function convertShadowsocks(node: ProxyNode): string {
 	const credential = `${text(node.cipher || node.method)}:${text(node.password)}`;
 	const link = `ss://${base64Url(credential)}@${authority(node.server, node.port)}`;
@@ -209,12 +216,8 @@ function buildMappedRules(geositeFile: string, geoipFile: string): string[] {
 	);
 }
 
-export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `https://config.eloxt.com${DAE_DATA_PREFIX}`): string {
-	const geositeFile = env.DAE_GEOSITE_FILE || DEFAULT_GEOSITE_FILE;
-	const geoipFile = env.DAE_GEOIP_FILE || DEFAULT_GEOIP_FILE;
-	const blockTags = splitTags(env.DAE_BLOCK_TAGS, []);
-	const directTags = splitTags(env.DAE_DIRECT_TAGS, []);
-	const nodeLines: string[] = [];
+function collectDaeNodeUris(proxies: ProxyNode[]): { uris: string[]; skipped: string[] } {
+	const uris: string[] = [];
 	const skipped: string[] = [];
 	const names = new Set<string>();
 	for (const node of proxies) {
@@ -226,9 +229,19 @@ export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `ht
 		}
 		names.add(node.name);
 		const uri = convertToDaeNode(node);
-		if (uri) nodeLines.push(`\t${quote(uri)}`);
+		if (uri) uris.push(uri);
 		else skipped.push(`${node.name} (${node.type})`);
 	}
+	return { uris, skipped };
+}
+
+export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `https://config.eloxt.com${DAE_DATA_PREFIX}`): string {
+	const geositeFile = env.DAE_GEOSITE_FILE || DEFAULT_GEOSITE_FILE;
+	const geoipFile = env.DAE_GEOIP_FILE || DEFAULT_GEOIP_FILE;
+	const blockTags = splitTags(env.DAE_BLOCK_TAGS, []);
+	const directTags = splitTags(env.DAE_DIRECT_TAGS, []);
+	const { uris: nodeUris, skipped } = collectDaeNodeUris(proxies);
+	const nodeLines = nodeUris.map((uri) => `\t${quote(uri)}`);
 
 	const rules = [
 		...extRules(geositeFile, blockTags, 'domain', 'block'),
@@ -302,6 +315,12 @@ export function buildDaeConfig(proxies: ProxyNode[], env: Env, dataBaseUrl = `ht
 	].join('\n');
 }
 
+/** Encode node links in the format dae-wing imports as a subscription. */
+export function buildDaeSubscription(proxies: ProxyNode[]): string {
+	const { uris } = collectDaeNodeUris(proxies);
+	return base64(`${uris.join('\n')}\n`);
+}
+
 export async function handleDaeRequest(env: Env, request: Request): Promise<Response> {
 	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
 	const dataBaseUrl = new URL(`${DAE_DATA_PATH}/`, request.url).toString();
@@ -310,6 +329,17 @@ export async function handleDaeRequest(env: Env, request: Request): Promise<Resp
 		headers: {
 			'Content-Type': 'text/plain;charset=utf-8',
 			'Content-Disposition': 'inline; filename="config.dae"',
+			'Cache-Control': 'no-store',
+		},
+	});
+}
+
+export async function handleDaeSubscriptionRequest(env: Env): Promise<Response> {
+	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
+	return new Response(buildDaeSubscription(proxies), {
+		headers: {
+			'Content-Type': 'text/plain;charset=utf-8',
+			'Content-Disposition': 'inline; filename="dae-subscription.txt"',
 			'Cache-Control': 'no-store',
 		},
 	});
