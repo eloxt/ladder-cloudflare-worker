@@ -2,3 +2,8 @@ YECAO_PROVIDER_URL="https://example.com/yecao-subscription"
 LIANGXIN_PROVIDER_URL="https://example.com/liangxin-subscription"
 XFLASH_PROVIDER_URL="https://example.com/xflash-subscription"
 TAILSCALE_AUTH_KEY="tskey-auth-example"
+# Optional dae settings.
+# DAE_GEOSITE_FILE="surge-geosite.dat"
+# DAE_GEOIP_FILE="surge-geoip.dat"
+# DAE_BLOCK_TAGS="reject,ip-reject,non-ip-reject,reject-extra,reject-drop,reject-no-drop,reject-url-regex,my-reject"
+# DAE_DIRECT_TAGS="direct,domestic,non-ip-domestic,lan,my-direct"

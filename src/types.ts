@@ -4,7 +4,11 @@ export interface Env {
 	LIANGXIN_PROVIDER_URL: string;
 	XFLASH_PROVIDER_URL: string;
 	TAILSCALE_AUTH_KEY: string;
-	TAILSCALE_ADMIRAL_AUTH_KEY: string;
+	TAILSCALE_ADMIRAL_AUTH_KEY?: string;
+	DAE_GEOSITE_FILE?: string;
+	DAE_GEOIP_FILE?: string;
+	DAE_BLOCK_TAGS?: string;
+	DAE_DIRECT_TAGS?: string;
 }
 
 export interface ProxyNode {

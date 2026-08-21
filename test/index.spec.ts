@@ -1,5 +1,6 @@
 import YAML from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DAE_DATA_PATH, buildDaeConfig, convertToDaeNode, handleDaeData } from '../src/handlers/dae';
 import worker from '../src/index';
 
 type WorkerEnv = Parameters<typeof worker.fetch>[1];
@@ -366,5 +367,88 @@ describe('sing-box conversion', () => {
 				utls: { enabled: true, fingerprint: 'firefox' },
 			},
 		});
+	});
+});
+
+describe('dae conversion', () => {
+	it('converts vless reality and anytls nodes to dae URIs', () => {
+		const vless = convertToDaeNode({
+			name: '🇭🇰 Reality',
+			type: 'vless',
+			server: '203.0.113.10',
+			port: 443,
+			uuid: '11111111-2222-4333-8444-555555555555',
+			tls: true,
+			servername: 'edge.example.com',
+			network: 'tcp',
+			flow: 'xtls-rprx-vision',
+			'reality-opts': { 'public-key': 'public-key', 'short-id': '0123456789abcdef' },
+			'client-fingerprint': 'chrome',
+		});
+		const anytls = convertToDaeNode({
+			name: '🇸🇬 AnyTLS',
+			type: 'anytls',
+			server: 'anytls.example.com',
+			port: 443,
+			password: 'secret',
+			sni: 'cdn.example.com',
+		});
+
+		expect(vless).toContain('vless://11111111-2222-4333-8444-555555555555@203.0.113.10:443?');
+		expect(vless).toContain('security=reality');
+		expect(vless).toContain('pbk=public-key');
+		expect(vless).toContain('%F0%9F%87%AD');
+		expect(anytls).toContain('anytls://secret@anytls.example.com:443/?sni=cdn.example.com');
+	});
+
+	it('builds a complete dae config and skips separator nodes', () => {
+		const config = buildDaeConfig(
+			[
+				{ name: '🇭🇰 Trojan', type: 'trojan', server: 'hk.example.com', port: 443, password: 'secret' },
+				{ name: '---野草---', type: 'trojan', server: '127.0.0.1', port: 55555, password: '' },
+			],
+			{
+				DAE_GEOSITE_FILE: 'surge-geosite.dat',
+				DAE_GEOIP_FILE: 'surge-geoip.dat',
+				STATIC_BUCKET: {} as R2Bucket,
+				YECAO_PROVIDER_URL: '',
+				LIANGXIN_PROVIDER_URL: '',
+				XFLASH_PROVIDER_URL: '',
+				TAILSCALE_AUTH_KEY: '',
+			} as any,
+			'https://config.eloxt.com/dae-data/test-token/',
+		);
+
+		expect(config).toContain('node {');
+		expect(config).toContain('trojan://secret@hk.example.com:443');
+		expect(config).not.toContain('127.0.0.1:55555');
+		expect(config).toContain('domain(ext:\'surge-geosite.dat:reject\') -> block');
+		expect(config).toContain('dip(ext:\'surge-geoip.dat:direct\') -> direct');
+		expect(config).toContain('domain(geosite:cn) -> direct');
+		expect(config).toContain('fallback: proxy');
+		expect(config).toContain('https://config.eloxt.com/dae-data/test-token/surge-geosite.dat');
+	});
+
+	it('serves only the generated dat objects from R2', async () => {
+		const bucket = {
+			get: vi.fn(async (key: string) => {
+				if (key !== 'dae-dat/surge-geosite.dat') return null;
+				return {
+					body: new Response('dat').body,
+					httpEtag: '"etag"',
+					writeHttpMetadata(headers: Headers) {
+						headers.set('content-type', 'application/octet-stream');
+					},
+				};
+			}),
+		};
+
+		const response = await handleDaeData(`${DAE_DATA_PATH}/surge-geosite.dat`, bucket as unknown as R2Bucket);
+		const denied = await handleDaeData(`${DAE_DATA_PATH}/private.txt`, bucket as unknown as R2Bucket);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('etag')).toBe('"etag"');
+		expect(await response.text()).toBe('dat');
+		expect(denied.status).toBe(404);
 	});
 });
