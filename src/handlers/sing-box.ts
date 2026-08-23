@@ -59,6 +59,11 @@ export async function handleSingBox(env: Env, device?: string, authKey?: string)
 		const tailscaleAuthKey = authKey || env.TAILSCALE_AUTH_KEY;
 		if (!tailscaleAuthKey) return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
 		addTailscaleConfiguration(template, device, tailscaleAuthKey, Boolean(authKey));
+
+		if (device === 'wrt') {
+			const tunInbound = template.inbounds.find((inbound: any) => inbound?.type === 'tun');
+			if (tunInbound) tunInbound.auto_route = true;
+		}
 	}
 
 	const outboundTags = ['direct'];

@@ -27,6 +27,7 @@ export default {
 		if (path === `${paths.singBox}/mac`) return handleSingBox(env, 'eloxts-macbook-pro');
 		if (path === `${paths.singBox}/iphone`) return handleSingBox(env, 'eloxts-iphone');
 		if (path === `${paths.singBox}/ipad`) return handleSingBox(env, 'eloxts-ipad');
+		if (path === `${paths.singBox}/wrt`) return handleSingBox(env, 'wrt');
 		if (path.startsWith(paths.admiral)) return handleSingBox(env, path.slice(paths.admiral.length), env.TAILSCALE_ADMIRAL_AUTH_KEY);
 		if (path.startsWith(paths.static)) return handleStatic(path, env.STATIC_BUCKET);
 		return new Response('Not Found', { status: 404 });
