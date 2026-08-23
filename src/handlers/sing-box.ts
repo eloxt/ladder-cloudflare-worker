@@ -62,7 +62,7 @@ export async function handleSingBox(env: Env, device?: string, authKey?: string)
 
 		if (device === 'wrt') {
 			const tunInbound = template.inbounds.find((inbound: any) => inbound?.type === 'tun');
-			if (tunInbound) tunInbound.auto_route = true;
+			if (tunInbound) tunInbound.auto_redirect = true;
 		}
 	}
 
