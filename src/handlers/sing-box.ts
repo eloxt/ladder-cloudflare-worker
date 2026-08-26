@@ -55,15 +55,14 @@ export async function handleSingBox(env: Env, device?: string, authKey?: string)
 	const templateFile = await env.STATIC_BUCKET.get('sing-box_template.json');
 	if (!templateFile) return new Response('sing-box_template.json not found', { status: 404 });
 	const template = JSON.parse(await templateFile.text());
-	if (device) {
+	if (device === 'wrt') {
+		const tunInbound = template.inbounds.find((inbound: any) => inbound?.type === 'tun');
+		if (tunInbound) tunInbound.auto_redirect = true;
+		template.inbounds.push({ type: 'direct', tag: 'dns-in', listen: '::', listen_port: 53 });
+	} else if (device) {
 		const tailscaleAuthKey = authKey || env.TAILSCALE_AUTH_KEY;
 		if (!tailscaleAuthKey) return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
 		addTailscaleConfiguration(template, device, tailscaleAuthKey, Boolean(authKey));
-
-		if (device === 'wrt') {
-			const tunInbound = template.inbounds.find((inbound: any) => inbound?.type === 'tun');
-			if (tunInbound) tunInbound.auto_redirect = true;
-		}
 	}
 
 	const outboundTags = ['direct'];

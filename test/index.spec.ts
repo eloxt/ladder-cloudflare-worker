@@ -1,12 +1,5 @@
 import YAML from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	DAE_DATA_PATH,
-	buildDaeConfig,
-	buildDaeSubscription,
-	convertToDaeNode,
-	handleDaeData,
-} from '../src/handlers/dae';
 import worker from '../src/index';
 
 type WorkerEnv = Parameters<typeof worker.fetch>[1];
@@ -374,111 +367,33 @@ describe('sing-box conversion', () => {
 			},
 		});
 	});
-});
 
-describe('dae conversion', () => {
-	it('converts vless reality and anytls nodes to dae URIs', () => {
-		const vless = convertToDaeNode({
-			name: '🇭🇰 Reality',
-			type: 'vless',
-			server: '203.0.113.10',
-			port: 443,
-			uuid: '11111111-2222-4333-8444-555555555555',
-			tls: true,
-			servername: 'edge.example.com',
-			network: 'tcp',
-			flow: 'xtls-rprx-vision',
-			'reality-opts': { 'public-key': 'public-key', 'short-id': '0123456789abcdef' },
-			'client-fingerprint': 'chrome',
-		});
-		const anytls = convertToDaeNode({
-			name: '🇸🇬 AnyTLS',
-			type: 'anytls',
-			server: 'anytls.example.com',
-			port: 443,
-			password: 'secret',
-			sni: 'cdn.example.com',
-		});
-
-		expect(vless).toContain('vless://11111111-2222-4333-8444-555555555555@203.0.113.10:443?');
-		expect(vless).toContain('security=reality');
-		expect(vless).toContain('pbk=public-key');
-		expect(vless).toContain('%F0%9F%87%AD');
-		expect(anytls).toContain('anytls://secret@anytls.example.com:443/?sni=cdn.example.com');
-	});
-
-	it('builds a complete dae config and skips separator nodes', () => {
-		const config = buildDaeConfig(
-			[
-				{ name: '🇭🇰 Trojan', type: 'trojan', server: 'hk.example.com', port: 443, password: 'secret' },
-				{ name: '---野草---', type: 'trojan', server: '127.0.0.1', port: 55555, password: '' },
-			],
-			{
-				DAE_GEOSITE_FILE: 'surge-geosite.dat',
-				DAE_GEOIP_FILE: 'surge-geoip.dat',
-				DAE_BLOCK_TAGS: 'reject',
-				STATIC_BUCKET: {} as R2Bucket,
-				YECAO_PROVIDER_URL: '',
-				LIANGXIN_PROVIDER_URL: '',
-				XFLASH_PROVIDER_URL: '',
-				TAILSCALE_AUTH_KEY: '',
-			} as any,
-			'https://config.eloxt.com/dae-data/test-token/',
-		);
-
-		expect(config).toContain('node {');
-		expect(config).toContain('trojan://secret@hk.example.com:443');
-		expect(config).not.toContain('127.0.0.1:55555');
-		expect(config).toContain('domain(ext:\'surge-geosite.dat:reject\') -> block');
-		expect(config).toContain('domain(ext:\'surge-geosite.dat:speedtest\') -> Speedtest');
-		expect(config).toContain('domain(ext:\'surge-geosite.dat:ai\') -> AI');
-		expect(config).toContain('domain(ext:\'surge-geosite.dat:telegram\') -> Telegram');
-		expect(config).toContain('domain(ext:\'surge-geosite.dat:global\') -> proxy');
-		expect(config).toContain('dip(ext:\'surge-geoip.dat:domestic\') -> direct');
-		expect(config).toContain('dip(ext:\'surge-geoip.dat:ip-cdn\') -> proxy');
-		expect(config).toContain('group {\n\tproxy {');
-		expect(config).toContain('\tSpeedtest {');
-		expect(config).toContain('\tAI {');
-		expect(config).toContain('\tTelegram {');
-		expect(config).toContain('domain(geosite:cn) -> direct');
-		expect(config).toContain('domain(hgj.com, hgj.net) -> direct');
-		expect(config).toContain('fallback: proxy');
-		expect(config).toContain('https://config.eloxt.com/dae-data/test-token/surge-geosite.dat');
-	});
-
-	it('builds a dae-wing compatible base64 subscription', () => {
-		const encoded = buildDaeSubscription([
-			{ name: '🇭🇰 Trojan', type: 'trojan', server: 'hk.example.com', port: 443, password: 'secret' },
-			{ name: '---野草---', type: 'trojan', server: '127.0.0.1', port: 55555, password: '' },
-		]);
-		const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-
-		expect(decoded).toContain('trojan://secret@hk.example.com:443');
-		expect(decoded).toContain('#');
-		expect(decoded).not.toContain('127.0.0.1:55555');
-		expect(decoded.endsWith('\n')).toBe(true);
-	});
-
-	it('serves only the generated dat objects from R2', async () => {
+	it('adds a DNS inbound for the OpenWrt sing-box configuration', async () => {
 		const bucket = {
 			get: vi.fn(async (key: string) => {
-				if (key !== 'dae-dat/surge-geosite.dat') return null;
-				return {
-					body: new Response('dat').body,
-					httpEtag: '"etag"',
-					writeHttpMetadata(headers: Headers) {
-						headers.set('content-type', 'application/octet-stream');
-					},
-				};
+				if (key === 'extra_node.yml') return { text: async () => YAML.dump({ proxies: [] }) };
+				if (key === 'sing-box_template.json') {
+					return {
+						text: async () => JSON.stringify({ endpoints: [], inbounds: [{ type: 'tun' }], route: { rules: [] }, outbounds: [] }),
+					};
+				}
+				return null;
 			}),
 		};
 
-		const response = await handleDaeData(`${DAE_DATA_PATH}/surge-geosite.dat`, bucket as unknown as R2Bucket);
-		const denied = await handleDaeData(`${DAE_DATA_PATH}/private.txt`, bucket as unknown as R2Bucket);
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(YAML.dump({ proxies: [] }))));
+
+		const env = createEnv(bucket as unknown as R2Bucket) as WorkerEnv & { TAILSCALE_AUTH_KEY?: string };
+		delete env.TAILSCALE_AUTH_KEY;
+		const response = await worker.fetch(
+			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/wrt'),
+			env,
+		);
+		const config = (await response.json()) as { endpoints: any[]; inbounds: any[] };
 
 		expect(response.status).toBe(200);
-		expect(response.headers.get('etag')).toBe('"etag"');
-		expect(await response.text()).toBe('dat');
-		expect(denied.status).toBe(404);
+		expect(config.endpoints).toEqual([]);
+		expect(config.inbounds).toContainEqual({ type: 'direct', tag: 'dns-in', listen: '::', listen_port: 53 });
 	});
 });
+
