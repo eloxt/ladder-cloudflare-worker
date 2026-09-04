@@ -1,16 +1,44 @@
 import YAML from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
+import type { ProviderConfig } from '../src/types';
 
 type WorkerEnv = Parameters<typeof worker.fetch>[1];
 
-function createEnv(bucket: R2Bucket): WorkerEnv {
+interface ConfigFixture {
+	providers?: ProviderConfig[];
+	extraNodes?: string;
+	clashTemplate?: string;
+	singBoxTemplate?: string;
+}
+
+function createEnv(fixture: ConfigFixture = {}): WorkerEnv {
 	return {
-		STATIC_BUCKET: bucket,
-		YECAO_PROVIDER_URL: 'https://provider.example.test/yecao',
-		LIANGXIN_PROVIDER_URL: 'https://provider.example.test/liangxin',
-		XFLASH_PROVIDER_URL: 'https://provider.example.test/xflash',
-		TAILSCALE_AUTH_KEY: 'test-tailscale-auth-key',
+		ASSETS: {
+			fetch: async () => new Response('<!doctype html><html><body><div id="root"></div></body></html>', { headers: { 'Content-Type': 'text/html' } }),
+		} as unknown as Fetcher,
+		DB: {
+			prepare: () => ({
+				first: async () => ({
+					providers: JSON.stringify(
+						fixture.providers || [
+							{ id: 'yecao', name: '野草', url: 'https://provider.example.test/yecao', enabled: true, addFlag: true },
+							{ id: 'liangxin', name: '良心云', url: 'https://provider.example.test/liangxin', enabled: true },
+							{ id: 'xflash', name: 'XFlash', url: 'https://provider.example.test/xflash', enabled: true },
+						],
+					),
+					extra_nodes: fixture.extraNodes || 'proxies: []\n',
+					tailscale_auth_key: 'database-tailscale-key',
+					tailscale_admiral_auth_key: 'database-admiral-key',
+					clash_template: fixture.clashTemplate || 'proxies: []\n',
+					sing_box_template:
+						fixture.singBoxTemplate || JSON.stringify({ endpoints: [], inbounds: [], route: { rules: [] }, outbounds: [] }),
+					updated_at: '2026-09-04T00:00:00.000Z',
+				}),
+				bind: () => ({ run: async () => ({ success: true }) }),
+			}),
+		} as unknown as D1Database,
+		ADMIN_PASSWORD: 'test-admin-password',
 	};
 }
 
@@ -21,56 +49,51 @@ describe('parseConfig via clash endpoint', () => {
 	});
 
 	it('adds named separators for each non-empty provider group', async () => {
-		const bucket = {
-			get: vi.fn(async (key: string) => {
-				if (key !== 'extra_node.yml') return null;
-				return {
-					text: async () => YAML.dump({ proxies: [{ name: '美国自建', type: 'trojan', server: 'self.example.com', port: 443, password: 'self' }] }),
-				};
-			}),
-		};
+		const env = createEnv({
+			extraNodes: YAML.dump({ proxies: [{ name: '美国自建', type: 'trojan', server: 'self.example.com', port: 443, password: 'self' }] }),
+		});
 
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = String(input);
-					if (url.includes('/yecao')) {
-						return new Response(
-							YAML.dump({
-								proxies: [{ name: '香港一号', type: 'trojan', server: 'hk.example.com', port: 443, password: 'hk' }],
-							}),
-							{
-								headers: {
-									'subscription-userinfo': 'upload=1704310932; download=72047148323; total=96636764160; expire=1804089600',
-								},
+				if (url.includes('/yecao')) {
+					return new Response(
+						YAML.dump({
+							proxies: [{ name: '香港一号', type: 'trojan', server: 'hk.example.com', port: 443, password: 'hk' }],
+						}),
+						{
+							headers: {
+								'subscription-userinfo': 'upload=1704310932; download=72047148323; total=96636764160; expire=1804089600',
 							},
-						);
-					}
-					if (url.includes('/liangxin')) {
-						return new Response(YAML.dump({ proxies: [] }));
-					}
-					if (url.includes('/xflash')) {
-						return new Response(
+						},
+					);
+				}
+				if (url.includes('/liangxin')) {
+					return new Response(YAML.dump({ proxies: [] }));
+				}
+				if (url.includes('/xflash')) {
+					return new Response(
 						YAML.dump({
 							proxies: [
 								{ name: '新加坡一号', type: 'trojan', server: 'sg.example.com', port: 443, password: 'sg' },
 								{ name: '日本一号', type: 'trojan', server: 'jp.example.com', port: 443, password: 'jp' },
-								],
-							}),
-							{
-								headers: {
-									'subscription-userinfo': 'upload=0; download=1073741824; total=2147483648; expire=1893456000',
-								},
+							],
+						}),
+						{
+							headers: {
+								'subscription-userinfo': 'upload=0; download=1073741824; total=2147483648; expire=1893456000',
 							},
-						);
-					}
+						},
+					);
+				}
 				throw new Error(`unexpected fetch: ${url}`);
 			}),
 		);
 
 		const response = await worker.fetch(
 			new Request('https://example.com/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737'),
-			createEnv(bucket as unknown as R2Bucket),
+			env,
 		);
 		const config = YAML.load(await response.text()) as { proxies: Array<{ name: string; type: string; server: string; port: number }> };
 
@@ -107,10 +130,6 @@ describe('parseConfig via clash endpoint', () => {
 	});
 
 	it('skips a provider when its yaml payload cannot be parsed', async () => {
-		const bucket = {
-			get: vi.fn(async () => null),
-		};
-
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {
@@ -138,13 +157,134 @@ describe('parseConfig via clash endpoint', () => {
 
 		const response = await worker.fetch(
 			new Request('https://example.com/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737'),
-			createEnv(bucket as unknown as R2Bucket),
+			createEnv(),
 		);
 		const config = YAML.load(await response.text()) as { proxies: Array<{ name: string }> };
 		const names = config.proxies.map((proxy) => proxy.name);
 
 		expect(names).toEqual(['---自建节点---', '良心云一号', '---良心云---', 'XFlash一号', '---XFlash---']);
 		expect(names.some((name) => name.includes('野草'))).toBe(false);
+	});
+
+	it('does not fetch disabled providers', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const response = await worker.fetch(
+			new Request('https://example.com/clash/dd32ef87-6f75-4d00-985b-21ec1fb2a737'),
+			createEnv({
+				providers: [{ id: 'disabled', name: '已停用', url: 'https://provider.example.test/disabled', enabled: false }],
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('serves the configured Clash template from the static template route', async () => {
+		const clashTemplate = 'mode: rule\nrules:\n  - MATCH,DIRECT\n';
+		const response = await worker.fetch(
+			new Request('https://example.com/2774d2d9-d46b-4819-be0e-3d654270efcd/clash.yaml'),
+			createEnv({ clashTemplate }),
+		);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('Cache-Control')).toBe('no-store');
+		expect(response.headers.get('Content-Type')).toBe('text/yaml;charset=utf-8');
+		expect(await response.text()).toBe(clashTemplate);
+	});
+});
+
+describe('admin configuration', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('serves the admin page without exposing the password', async () => {
+		const response = await worker.fetch(new Request('https://example.com/admin'), createEnv());
+		const html = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+		expect(html).toContain('<div id="root"></div>');
+		expect(html).not.toContain('test-admin-password');
+	});
+
+	it('requires a valid password and signed session cookie for config access', async () => {
+		const env = createEnv();
+		const headers = { Origin: 'https://example.com', 'Content-Type': 'application/json' };
+		const denied = await worker.fetch(
+			new Request('https://example.com/admin/api/login', { method: 'POST', headers, body: JSON.stringify({ password: 'wrong' }) }),
+			env,
+		);
+		expect(denied.status).toBe(401);
+
+		const login = await worker.fetch(
+			new Request('https://example.com/admin/api/login', {
+				method: 'POST',
+				headers,
+				body: JSON.stringify({ password: 'test-admin-password' }),
+			}),
+			env,
+		);
+		const cookie = login.headers.get('Set-Cookie');
+		expect(login.status).toBe(200);
+		expect(cookie).toContain('HttpOnly');
+		expect(cookie).toContain('SameSite=Strict');
+
+		const config = await worker.fetch(
+			new Request('https://example.com/admin/api/config', { headers: { Cookie: cookie! } }),
+			env,
+		);
+		expect(config.status).toBe(200);
+		expect((await config.json()) as { providers: unknown[] }).toMatchObject({ providers: expect.any(Array) });
+	});
+
+	it('validates and saves the complete configuration', async () => {
+		const env = createEnv();
+		const originHeaders = { Origin: 'https://example.com', 'Content-Type': 'application/json' };
+		const login = await worker.fetch(
+			new Request('https://example.com/admin/api/login', {
+				method: 'POST',
+				headers: originHeaders,
+				body: JSON.stringify({ password: 'test-admin-password' }),
+			}),
+			env,
+		);
+		const response = await worker.fetch(
+			new Request('https://example.com/admin/api/config', {
+				method: 'PUT',
+				headers: { ...originHeaders, Cookie: login.headers.get('Set-Cookie')! },
+				body: JSON.stringify({
+					providers: [{ id: 'provider-1', name: '订阅一', url: 'https://provider.example.test/sub', enabled: true }],
+					extraNodes: 'proxies: []\n',
+					tailscaleAuthKey: 'saved-tailscale-key',
+					tailscaleAdmiralAuthKey: 'saved-admiral-key',
+					clashTemplate: 'mode: rule\nproxies: []\n',
+					singBoxTemplate: JSON.stringify({ endpoints: [], inbounds: [], outbounds: [], route: { rules: [] } }),
+				}),
+			}),
+			env,
+		);
+		const saved = (await response.json()) as {
+			providers: unknown[];
+			tailscaleAuthKey: string;
+			tailscaleAdmiralAuthKey: string;
+			updatedAt: string;
+		};
+
+		expect(response.status).toBe(200);
+		expect(saved.providers).toHaveLength(1);
+		expect(saved.tailscaleAuthKey).toBe('saved-tailscale-key');
+		expect(saved.tailscaleAdmiralAuthKey).toBe('saved-admiral-key');
+		expect(saved.updatedAt).toMatch(/^2026-/);
+	});
+
+	it('rejects malformed session cookies as unauthorized', async () => {
+		const response = await worker.fetch(
+			new Request('https://example.com/admin/api/config', { headers: { Cookie: 'ladder_admin_session=9999999999.not-base64!' } }),
+			createEnv(),
+		);
+		expect(response.status).toBe(401);
 	});
 });
 
@@ -155,49 +295,30 @@ describe('sing-box conversion', () => {
 	});
 
 	it('converts vless nodes to sing-box outbounds', async () => {
-		const bucket = {
-			get: vi.fn(async (key: string) => {
-				if (key === 'extra_node.yml') {
-					return {
-						text: async () =>
-							YAML.dump({
-								proxies: [
-									{
-										name: '美国 VLESS',
-										type: 'vless',
-										server: 'vless.example.com',
-										port: 443,
-										uuid: 'bf000d23-0752-40b4-affe-68f7707a9661',
-										tls: true,
-										servername: 'cdn.example.com',
-										network: 'ws',
-										'ws-opts': {
-											path: '/ws',
-											headers: {
-												Host: 'cdn.example.com',
-											},
-										},
-										'client-fingerprint': 'chrome',
-									},
-								],
-							}),
-					};
-				}
-				if (key === 'sing-box_template.json') {
-					return {
-						text: async () =>
-							JSON.stringify({
-								endpoints: [],
-								route: {
-									rules: [],
-								},
-								outbounds: [],
-							}),
-					};
-				}
-				return null;
+		const env = createEnv({
+			extraNodes: YAML.dump({
+				proxies: [
+					{
+						name: '美国 VLESS',
+						type: 'vless',
+						server: 'vless.example.com',
+						port: 443,
+						uuid: 'bf000d23-0752-40b4-affe-68f7707a9661',
+						tls: true,
+						servername: 'cdn.example.com',
+						network: 'ws',
+						'ws-opts': {
+							path: '/ws',
+							headers: {
+								Host: 'cdn.example.com',
+							},
+						},
+						'client-fingerprint': 'chrome',
+					},
+				],
 			}),
-		};
+			singBoxTemplate: JSON.stringify({ endpoints: [], route: { rules: [] }, outbounds: [] }),
+		});
 
 		vi.stubGlobal(
 			'fetch',
@@ -206,7 +327,7 @@ describe('sing-box conversion', () => {
 
 		const response = await worker.fetch(
 			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
-			createEnv(bucket as unknown as R2Bucket),
+			env,
 		);
 		const config = (await response.json()) as { outbounds: any[] };
 		const outbound = config.outbounds.find((item) => item.tag === '🇺🇸 美国 VLESS');
@@ -236,49 +357,30 @@ describe('sing-box conversion', () => {
 	});
 
 	it('converts vless tcp reality nodes to sing-box outbounds', async () => {
-		const bucket = {
-			get: vi.fn(async (key: string) => {
-				if (key === 'extra_node.yml') {
-					return {
-						text: async () =>
-							YAML.dump({
-								proxies: [
-									{
-										name: '美国 Mock VLESS',
-										type: 'vless',
-										server: '203.0.113.10',
-										port: 443,
-										uuid: '11111111-2222-4333-8444-555555555555',
-										network: 'tcp',
-										tls: true,
-										udp: true,
-										flow: 'xtls-rprx-vision',
-										servername: 'stream.example.com',
-										'client-fingerprint': 'chrome',
-										'reality-opts': {
-											'public-key': 'mockRealityPublicKeyForSingBoxTest1234567890',
-											'short-id': '0123456789abcdef',
-										},
-									},
-								],
-							}),
-					};
-				}
-				if (key === 'sing-box_template.json') {
-					return {
-						text: async () =>
-							JSON.stringify({
-								endpoints: [],
-								route: {
-									rules: [],
-								},
-								outbounds: [],
-							}),
-					};
-				}
-				return null;
+		const env = createEnv({
+			extraNodes: YAML.dump({
+				proxies: [
+					{
+						name: '美国 Mock VLESS',
+						type: 'vless',
+						server: '203.0.113.10',
+						port: 443,
+						uuid: '11111111-2222-4333-8444-555555555555',
+						network: 'tcp',
+						tls: true,
+						udp: true,
+						flow: 'xtls-rprx-vision',
+						servername: 'stream.example.com',
+						'client-fingerprint': 'chrome',
+						'reality-opts': {
+							'public-key': 'mockRealityPublicKeyForSingBoxTest1234567890',
+							'short-id': '0123456789abcdef',
+						},
+					},
+				],
 			}),
-		};
+			singBoxTemplate: JSON.stringify({ endpoints: [], route: { rules: [] }, outbounds: [] }),
+		});
 
 		vi.stubGlobal(
 			'fetch',
@@ -287,7 +389,7 @@ describe('sing-box conversion', () => {
 
 		const response = await worker.fetch(
 			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
-			createEnv(bucket as unknown as R2Bucket),
+			env,
 		);
 		const config = (await response.json()) as { outbounds: any[] };
 		const outbound = config.outbounds.find((item) => item.tag === '🇺🇸 美国 Mock VLESS');
@@ -316,39 +418,29 @@ describe('sing-box conversion', () => {
 	});
 
 	it('converts anytls nodes to sing-box outbounds', async () => {
-		const bucket = {
-			get: vi.fn(async (key: string) => {
-				if (key === 'extra_node.yml') {
-					return {
-						text: async () =>
-							YAML.dump({
-								proxies: [
-									{
-										name: '澳大利亚',
-										type: 'anytls',
-										server: '03.giant.au.example.com',
-										port: 443,
-										password: 'example',
-										'client-fingerprint': 'firefox',
-										sni: 'dss0.bdstatic.com',
-										'skip-cert-verify': true,
-									},
-								],
-							}),
-					};
-				}
-				if (key === 'sing-box_template.json') {
-					return { text: async () => JSON.stringify({ endpoints: [], route: { rules: [] }, outbounds: [] }) };
-				}
-				return null;
+		const env = createEnv({
+			extraNodes: YAML.dump({
+				proxies: [
+					{
+						name: '澳大利亚',
+						type: 'anytls',
+						server: '03.giant.au.example.com',
+						port: 443,
+						password: 'example',
+						'client-fingerprint': 'firefox',
+						sni: 'dss0.bdstatic.com',
+						'skip-cert-verify': true,
+					},
+				],
 			}),
-		};
+			singBoxTemplate: JSON.stringify({ endpoints: [], route: { rules: [] }, outbounds: [] }),
+		});
 
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(YAML.dump({ proxies: [] }))));
 
 		const response = await worker.fetch(
 			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad'),
-			createEnv(bucket as unknown as R2Bucket),
+			env,
 		);
 		const config = (await response.json()) as { outbounds: any[] };
 		const outbound = config.outbounds.find((item) => item.tag === '🇦🇹 澳大利亚');
@@ -369,22 +461,13 @@ describe('sing-box conversion', () => {
 	});
 
 	it('adds a DNS inbound for the OpenWrt sing-box configuration', async () => {
-		const bucket = {
-			get: vi.fn(async (key: string) => {
-				if (key === 'extra_node.yml') return { text: async () => YAML.dump({ proxies: [] }) };
-				if (key === 'sing-box_template.json') {
-					return {
-						text: async () => JSON.stringify({ endpoints: [], inbounds: [{ type: 'tun' }], route: { rules: [] }, outbounds: [] }),
-					};
-				}
-				return null;
-			}),
-		};
+		const env = createEnv({
+			extraNodes: YAML.dump({ proxies: [] }),
+			singBoxTemplate: JSON.stringify({ endpoints: [], inbounds: [{ type: 'tun' }], route: { rules: [] }, outbounds: [] }),
+		});
 
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(YAML.dump({ proxies: [] }))));
 
-		const env = createEnv(bucket as unknown as R2Bucket) as WorkerEnv & { TAILSCALE_AUTH_KEY?: string };
-		delete env.TAILSCALE_AUTH_KEY;
 		const response = await worker.fetch(
 			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/wrt'),
 			env,
@@ -395,5 +478,35 @@ describe('sing-box conversion', () => {
 		expect(config.endpoints).toEqual([]);
 		expect(config.inbounds).toContainEqual({ type: 'direct', tag: 'dns-in', listen: '::', listen_port: 53 });
 	});
-});
 
+	it('uses the Tailscale keys stored in D1 for standard and Admiral devices', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(YAML.dump({ proxies: [] }))));
+		const env = createEnv();
+
+		const response = await worker.fetch(
+			new Request('https://example.com/sing-box/5f1ba618-dfbc-46cb-a4a5-697fa7f849ad/iphone'),
+			env,
+		);
+		const config = (await response.json()) as { endpoints: any[] };
+		const admiralResponse = await worker.fetch(new Request('https://example.com/sing-box/admiralxs/router'), env);
+		const admiralConfig = (await admiralResponse.json()) as { endpoints: any[]; route: { rules: any[] } };
+
+		expect(response.status).toBe(200);
+		expect(config.endpoints).toContainEqual({
+			type: 'tailscale',
+			tag: 'tailscale',
+			auth_key: 'database-tailscale-key',
+			hostname: 'eloxts-iphone-sing-box',
+			accept_routes: true,
+		});
+		expect(admiralResponse.status).toBe(200);
+		expect(admiralConfig.endpoints).toContainEqual({
+			type: 'tailscale',
+			tag: 'tailscale',
+			auth_key: 'database-admiral-key',
+			hostname: 'router-sing-box',
+			accept_routes: true,
+		});
+		expect(admiralConfig.route.rules).toContainEqual({ ip_cidr: '10.0.0.0/24', outbound: 'tailscale' });
+	});
+});

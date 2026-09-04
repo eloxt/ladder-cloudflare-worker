@@ -1,7 +1,4 @@
-YECAO_PROVIDER_URL="https://example.com/yecao-subscription"
-LIANGXIN_PROVIDER_URL="https://example.com/liangxin-subscription"
-XFLASH_PROVIDER_URL="https://example.com/xflash-subscription"
-TAILSCALE_AUTH_KEY="tskey-auth-example"
+ADMIN_PASSWORD="replace-with-a-long-random-password"
 # Optional extra dae rules. The default routing follows the sing-box template.
 # DAE_GEOSITE_FILE="surge-geosite.dat"
 # DAE_GEOIP_FILE="surge-geoip.dat"

@@ -1,11 +1,5 @@
 import YAML from 'js-yaml';
-import type { Env, ProxyNode } from './types';
-
-interface ProviderConfig {
-	name: string;
-	url: string;
-	addFlag: boolean;
-}
+import type { ProviderConfig, ProxyNode } from './types';
 
 interface ProviderResult {
 	name: string;
@@ -14,14 +8,6 @@ interface ProviderResult {
 }
 
 const clashUserAgent = 'mihomo.party/v1.9.2 (clash.meta)';
-
-export function buildProviderConfigs(env: Env): ProviderConfig[] {
-	return [
-		{ name: '野草', url: env.YECAO_PROVIDER_URL, addFlag: true },
-		{ name: '良心云', url: env.LIANGXIN_PROVIDER_URL, addFlag: false },
-		{ name: 'XFlash', url: env.XFLASH_PROVIDER_URL, addFlag: false },
-	];
-}
 
 function createSeparator(name: string): ProxyNode {
 	return {
@@ -119,13 +105,12 @@ async function loadProviderNodes(provider: ProviderConfig): Promise<ProviderResu
 	};
 }
 
-export async function parseConfig(bucket: R2Bucket, providerConfigs: ProviderConfig[], addExtra = true): Promise<ProxyNode[]> {
+export async function parseConfig(providerConfigs: ProviderConfig[], extraNodes: string, addExtra = true): Promise<ProxyNode[]> {
 	const proxies: ProxyNode[] = [];
 
 	if (addExtra) {
-		const extraFile = await bucket.get('extra_node.yml');
-		if (extraFile) {
-			const extraConfig = YAML.load(await extraFile.text()) as { proxies?: ProxyNode[] };
+		if (extraNodes.trim()) {
+			const extraConfig = YAML.load(extraNodes) as { proxies?: ProxyNode[] };
 			for (const node of extraConfig.proxies || []) {
 				node.name = countryFlag(node.name) + ' ' + node.name;
 				proxies.push(node);
@@ -135,7 +120,7 @@ export async function parseConfig(bucket: R2Bucket, providerConfigs: ProviderCon
 		proxies.push(createSeparator('---自建节点---'));
 	}
 
-	const providerResults = await Promise.all(providerConfigs.map(loadProviderNodes));
+	const providerResults = await Promise.all(providerConfigs.filter((provider) => provider.enabled).map(loadProviderNodes));
 	for (const group of providerResults.filter((group) => group.nodes.length > 0)) {
 		proxies.push(...group.nodes, createSeparator(buildProviderSeparatorName(group.name, group.subscriptionUserinfo)));
 	}

@@ -13,13 +13,25 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"r2_buckets": [
+	"d1_databases": [
 		{
-			"binding": "STATIC_BUCKET",
-			"bucket_name": "ladder-static",
-			"remote": true,
+			"binding": "DB",
+			"database_name": "ladder-config",
+			"database_id": "3bcf1649-bf77-4c3c-85cc-da703dde2d0f",
+			"migrations_dir": "migrations",
 		},
 	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./dist/client",
+		"run_worker_first": [
+			"/",
+			"/index.html",
+			"/admin",
+			"/admin/",
+			"/admin/api/*",
+		],
+	},
 	"routes": [
 		{
 			"pattern": "config.eloxt.com",
@@ -33,10 +45,7 @@
 	"preview_urls": true,
 	"secrets": {
 		"required": [
-			"YECAO_PROVIDER_URL",
-			"LIANGXIN_PROVIDER_URL",
-			"XFLASH_PROVIDER_URL",
-			"TAILSCALE_AUTH_KEY",
+			"ADMIN_PASSWORD",
 		],
 	},
 	/**
@@ -57,11 +66,6 @@
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
 	 */
 	// "vars": {  "MY_VARIABLE": "production_value" }
-	/**
-	 * Static Assets
-	 * https://developers.cloudflare.com/workers/static-assets/binding/
-	 */
-	// "assets": {  "directory": "./public/",  "binding": "ASSETS" }
 	/**
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

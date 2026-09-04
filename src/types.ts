@@ -1,14 +1,29 @@
 export interface Env {
-	STATIC_BUCKET: R2Bucket;
-	YECAO_PROVIDER_URL: string;
-	LIANGXIN_PROVIDER_URL: string;
-	XFLASH_PROVIDER_URL: string;
-	TAILSCALE_AUTH_KEY: string;
-	TAILSCALE_ADMIRAL_AUTH_KEY?: string;
+	ASSETS: Fetcher;
+	DB: D1Database;
+	ADMIN_PASSWORD?: string;
 	DAE_GEOSITE_FILE?: string;
 	DAE_GEOIP_FILE?: string;
 	DAE_BLOCK_TAGS?: string;
 	DAE_DIRECT_TAGS?: string;
+}
+
+export interface ProviderConfig {
+	id: string;
+	name: string;
+	url: string;
+	enabled: boolean;
+	addFlag?: boolean;
+}
+
+export interface AppConfig {
+	providers: ProviderConfig[];
+	extraNodes: string;
+	tailscaleAuthKey: string;
+	tailscaleAdmiralAuthKey: string;
+	clashTemplate: string;
+	singBoxTemplate: string;
+	updatedAt: string | null;
 }
 
 export interface ProxyNode {

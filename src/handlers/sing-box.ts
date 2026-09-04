@@ -1,4 +1,5 @@
-import { buildProviderConfigs, parseConfig } from '../proxies';
+import { loadConfig } from '../config';
+import { parseConfig } from '../proxies';
 import type { Env, ProxyNode } from '../types';
 
 function buildTls(node: ProxyNode, enabled: boolean) {
@@ -50,19 +51,20 @@ function addTailscaleConfiguration(template: any, device: string, authKey: strin
 	else template.route.rules.splice(lanIpIndex, 0, ...rules);
 }
 
-export async function handleSingBox(env: Env, device?: string, authKey?: string): Promise<Response> {
-	const proxies = await parseConfig(env.STATIC_BUCKET, buildProviderConfigs(env));
-	const templateFile = await env.STATIC_BUCKET.get('sing-box_template.json');
-	if (!templateFile) return new Response('sing-box_template.json not found', { status: 404 });
-	const template = JSON.parse(await templateFile.text());
+export async function handleSingBox(env: Env, device?: string, isAdmiral = false): Promise<Response> {
+	const config = await loadConfig(env);
+	const proxies = await parseConfig(config.providers, config.extraNodes);
+	const template = JSON.parse(config.singBoxTemplate);
 	if (device === 'wrt') {
 		const tunInbound = template.inbounds.find((inbound: any) => inbound?.type === 'tun');
 		if (tunInbound) tunInbound.auto_redirect = true;
 		template.inbounds.push({ type: 'direct', tag: 'dns-in', listen: '::', listen_port: 53 });
 	} else if (device) {
-		const tailscaleAuthKey = authKey || env.TAILSCALE_AUTH_KEY;
-		if (!tailscaleAuthKey) return new Response('TAILSCALE_AUTH_KEY is not configured', { status: 500 });
-		addTailscaleConfiguration(template, device, tailscaleAuthKey, Boolean(authKey));
+		const tailscaleAuthKey = isAdmiral ? config.tailscaleAdmiralAuthKey : config.tailscaleAuthKey;
+		if (!tailscaleAuthKey) {
+			return new Response(`${isAdmiral ? 'Tailscale Admiral Auth Key' : 'Tailscale Auth Key'} is not configured`, { status: 500 });
+		}
+		addTailscaleConfiguration(template, device, tailscaleAuthKey, isAdmiral);
 	}
 
 	const outboundTags = ['direct'];
